@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { Command } = require('commander');
+const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -50,7 +51,7 @@ program
 
 program
   .command('add <component>')
-  .description('Add a component to your Remotion project')
+  .description('Add a component and automatically install required dependencies')
   .action(async (component) => {
     console.log(`\n🚀 Fetching component registry for: ${component}...`);
     try {
@@ -62,7 +63,7 @@ program
         process.exit(1);
       }
 
-      console.log(`📦 Downloading ${compData.name}...`);
+      console.log(`📦 Downloading component files for ${compData.name}...`);
       for (const fileObj of compData.files) {
         const fileUrl = `${RAW_BASE_URL}/${fileObj.path}`;
         const destPath = path.join(process.cwd(), 'src', fileObj.path);
@@ -70,18 +71,25 @@ program
         await downloadFile(fileUrl, destPath);
       }
 
-      // Also download audio assets if present
+      console.log(`🎵 Downloading required audio assets...`);
       const audioFiles = ['key-click.wav', 'key-space.wav', 'key-enter.wav', 'fire-whoosh.wav'];
       for (const audio of audioFiles) {
         const audioUrl = `${RAW_BASE_URL}/components/terminal-simulator/assets/audio/${audio}`;
         const audioDest = path.join(process.cwd(), 'public', 'audio', audio);
-        console.log(`   Downloading audio asset -> public/audio/${audio}...`);
         await downloadFile(audioUrl, audioDest);
       }
 
-      console.log(`\n✨ Successfully added ${compData.name}!`);
-      console.log(`💡 Required npm dependencies: ${compData.dependencies.join(', ')}`);
-      console.log(`   Run: npm install ${compData.dependencies.join(' ')}\n`);
+      if (compData.dependencies && compData.dependencies.length > 0) {
+        console.log(`\n📦 Automatically installing npm dependencies: ${compData.dependencies.join(', ')}...`);
+        try {
+          execSync(`npm install ${compData.dependencies.join(' ')}`, { stdio: 'inherit' });
+          console.log(`✨ Dependencies installed successfully!`);
+        } catch (installErr) {
+          console.warn(`⚠️ Warning: Automatic installation encountered an issue. Please run: npm install ${compData.dependencies.join(' ')}`);
+        }
+      }
+
+      console.log(`\n✨ Successfully added ${compData.name} to your project!\n`);
     } catch (err) {
       console.error(`❌ Error adding component:`, err.message);
       process.exit(1);
