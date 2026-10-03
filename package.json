@@ -1,0 +1,14 @@
+{
+  "name": "malesngonten",
+  "version": "1.0.0",
+  "description": "CLI tool to add cinematic Remotion components and terminal simulators",
+  "bin": {
+    "malesngonten": "./bin/cli.js"
+  },
+  "dependencies": {
+    "commander": "^11.1.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
