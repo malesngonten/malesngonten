@@ -33,6 +33,12 @@ function downloadFile(url, dest) {
     fs.mkdirSync(dir, { recursive: true });
     const file = fs.createWriteStream(dest);
     https.get(url, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        fs.closeSync(fs.openSync(dest, 'w'));
+        fs.unlinkSync(dest);
+        return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+      }
       res.pipe(file);
       file.on('finish', () => {
         file.close(resolve);
@@ -42,6 +48,28 @@ function downloadFile(url, dest) {
       reject(err);
     });
   });
+}
+
+// Component keys in registry.json use display names (e.g. "Three Phone Demo"),
+// while users install with the export/slug name (e.g. "ThreePhoneDemo",
+// "three-phone-demo"). Normalize away separators and casing so every spelling
+// of a component resolves to the same registry key.
+function normalizeName(name) {
+  return String(name).toLowerCase().replace(/[\s_-]/g, '');
+}
+
+function findComponent(registry, input) {
+  const components = registry.components || {};
+  if (components[input]) {
+    return { key: input, data: components[input] };
+  }
+  const target = normalizeName(input);
+  for (const [key, data] of Object.entries(components)) {
+    if (normalizeName(key) === target) {
+      return { key, data };
+    }
+  }
+  return null;
 }
 
 program
@@ -56,12 +84,19 @@ program
     console.log(`\n🚀 Fetching component registry for: ${component}...`);
     try {
       const registry = await fetchJson(REGISTRY_URL);
-      const compData = registry.components[component];
-      
-      if (!compData) {
+      const match = findComponent(registry, component);
+
+      if (!match) {
         console.error(`❌ Component "${component}" not found in registry.`);
+        const hints = Object.keys(registry.components || {})
+          .filter((key) => normalizeName(key).includes(normalizeName(component)))
+          .slice(0, 5);
+        if (hints.length > 0) {
+          console.error(`   Closest matches: ${hints.join(', ')}`);
+        }
         process.exit(1);
       }
+      const compData = match.data;
 
       console.log(`📦 Downloading component files for ${compData.name}...`);
       for (const fileObj of compData.files) {
@@ -71,12 +106,22 @@ program
         await downloadFile(fileUrl, destPath);
       }
 
-      console.log(`🎵 Downloading required audio assets...`);
-      const audioFiles = ['key-click.wav', 'key-space.wav', 'key-enter.wav', 'fire-whoosh.wav'];
-      for (const audio of audioFiles) {
-        const audioUrl = `${RAW_BASE_URL}/components/terminal-simulator/assets/audio/${audio}`;
-        const audioDest = path.join(process.cwd(), 'public', 'audio', audio);
-        await downloadFile(audioUrl, audioDest);
+      // Static assets (audio, fonts, .glb models, ...) referenced by the
+      // component through staticFile(). Each entry is { path, dest }: "path"
+      // is the file inside this repository, "dest" is where it lands in the
+      // user's project relative to the project root (usually under public/, so
+      // Remotion's staticFile() can resolve it).
+      const assets = compData.publicAssets || [];
+      for (const asset of assets) {
+        const src = typeof asset === 'string' ? asset : asset.path;
+        const dest = typeof asset === 'string' ? asset : (asset.dest || asset.path);
+        const assetUrl = `${RAW_BASE_URL}/${src}`;
+        const assetDest = path.join(process.cwd(), dest);
+        console.log(`   Downloading ${src} -> ${dest}...`);
+        await downloadFile(assetUrl, assetDest);
+      }
+      if (assets.length === 0) {
+        console.log(`🎨 No extra static assets required for this component.`);
       }
 
       if (compData.dependencies && compData.dependencies.length > 0) {
